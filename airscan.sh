@@ -364,13 +364,6 @@ guess_network_type() {
 # format.sh - Modulo de formatacao estilo aircrack-ng
 # ============================================================
 
-BOLD='\033[1m'
-DIM='\033[2m'
-R='\033[0;31m'
-G='\033[0;32m'
-Y='\033[1;33m'
-N='\033[0m'
-
 print_banner() {
   clear 2>/dev/null || true
   echo
@@ -380,52 +373,19 @@ print_banner() {
   echo
 }
 
-msg_info()   { echo -e "  ${BOLD}[+]${N} $1"; }
-msg_warn()   { echo -e "  ${BOLD}[!]${N} $1"; }
-msg_error()  { echo -e "  ${BOLD}[-]${N} $1"; }
-msg_status() { echo -e "     ${DIM}$1${N}"; }
+msg_info()   { echo "  [+] $1"; }
+msg_warn()   { echo "  [!] $1"; }
+msg_error()  { echo "  [-] $1"; }
 
 print_header() {
   local title="$1"
   echo
-  echo "  ${BOLD}${title}${N}"
+  echo "  $title"
   printf '%*s\n' 56 '' | tr ' ' '-'
 }
 
-sec_label() {
-  local caps="$1"
-  [ -z "$caps" ] && echo "ABERTA" && return
-  local u; u=$(echo "$caps" | tr '[:lower:]' '[:upper:]')
-  echo "$u" | grep -q "WPA3" && echo "WPA3" && return
-  echo "$u" | grep -q "WPA2\|RSN\|CCMP" && echo "WPA2" && return
-  echo "$u" | grep -q "WPA1\|WPAPSK\|TKIP" && echo "WPA" && return
-  echo "$u" | grep -q "WEP" && echo "WEP" && return
-  echo "$u" | grep -q "OWE" && echo "OWE" && return
-  echo "$u" | grep -q "ESS\|WPS" && echo "ABERTA" && return
-  echo "????"
-}
-
 show_summary() {
-  local data="${1:-$NETWORKS}"
-  local total
-  total=$(echo "$data" | jq 'length' 2>/dev/null || echo 0)
-  [ "$total" -eq 0 ] && { msg_error "Nenhuma rede encontrada."; return; }
-  print_header "Redes Encontradas: $total"
-  echo
-  printf "  %-2s %-32s %-17s %-3s %-5s %s\n" "N" "SSID" "BSSID" "CH" "SINAL" "SEGURANCA"
-  printf "  %-2s %-32s %-17s %-3s %-5s %s\n" "--" "--------------------------------" "-----------------" "---" "-----" "---------"
-  local idx=0
-  echo "$data" | jq -c '.[]' 2>/dev/null | while read -r net; do
-    idx=$((idx + 1))
-    local ssid bssid freq level caps
-    ssid=$(echo "$net" | jq -r '.ssid // "(oculta)"')
-    bssid=$(echo "$net" | jq -r '.bssid // "00:00:00:00:00:00"')
-    freq=$(echo "$net" | jq -r '.frequency // "0"')
-    level=$(echo "$net" | jq -r '.level // "0"')
-    caps=$(echo "$net" | jq -r '.capabilities // ""')
-    local chan enc; chan=$(freq_to_channel "$freq"); enc=$(sec_label "$caps")
-    printf "  %-2d %-32s %-17s %-3s %+4d  %s\n" "$idx" "${ssid:0:32}" "$bssid" "$chan" "$level" "$enc"
-  done
+  show_networks "$@"
 }
 
 show_network_detail() {
@@ -448,16 +408,16 @@ show_network_detail() {
   risk=$(assess_risk "$enc" "$caps"); risk_level="${risk%%|*}"; risk_desc="${risk#*|}"
 
   echo
-  echo "  ${BOLD}SSID:${N}         $ssid"
-  echo "  ${BOLD}BSSID:${N}        $bssid"
-  echo "  ${BOLD}Fabricante:${N}   ${vendor:-Desconhecido}"
-  echo "  ${BOLD}Canal:${N}        $chan ($band, $width)"
-  echo "  ${BOLD}Frequencia:${N}   ${freq}MHz"
-  echo "  ${BOLD}Sinal:${N}        ${level}dBm ($qual, ${pct}%)"
-  echo "  ${BOLD}Distancia:${N}    $dist"
-  echo "  ${BOLD}Cripto:${N}       $enc"
-  echo "  ${BOLD}Tipo:${N}         $(guess_network_type "$ssid")"
-  echo "  ${BOLD}Risco:${N}        $risk_level - $risk_desc"
+  echo "  SSID:         $ssid"
+  echo "  BSSID:        $bssid"
+  echo "  Fabricante:   ${vendor:-Desconhecido}"
+  echo "  Canal:        $chan ($band, $width)"
+  echo "  Frequencia:   ${freq}MHz"
+  echo "  Sinal:        ${level}dBm ($qual, ${pct}%)"
+  echo "  Distancia:    $dist"
+  echo "  Cripto:       $enc"
+  echo "  Tipo:         $(guess_network_type "$ssid")"
+  echo "  Risco:        $risk_level - $risk_desc"
   echo
 }
 
@@ -472,7 +432,7 @@ show_networks() {
   local idx=0
   echo "$data" | jq -c '.[]' 2>/dev/null | while read -r net; do
     idx=$((idx + 1))
-    echo "  ${BOLD}[${idx}]${N} ----------------------------------------------------"
+    echo "  [${idx}] ----------------------------------------------------"
     show_network_detail "$net"
   done
 }
@@ -501,18 +461,33 @@ perform_scan() {
 }
 
 watch_mode() {
-  local interval="${1:-5}"
-  print_banner
-  echo "  Modo monitoramento continuo (intervalo: ${interval}s)"
-  echo "  Pressione Ctrl+C para parar"
-  echo
+  local interval="${1:-5}" count=0 scanner
+  scanner=$(get_scanner_info)
+
   while true; do
     if perform_scan; then
-      local agora; agora=$(date '+%H:%M:%S')
-      msg_info "[$agora] Varredura concluida: $TOTAL_NETWORKS redes encontradas"
-      show_summary
+      count=$((count + 1))
     fi
-    echo; echo "  Proxima varredura em ${interval}s... (Ctrl+C para sair)"
+
+    clear 2>/dev/null || true
+    echo
+    echo "    airscan v${VERSION} - Modo Monitor (Scan Detalhado)"
+    echo "    ${scanner} | $(date '+%d/%m/%Y %H:%M:%S') | Varreduras: ${count} | Redes: ${TOTAL_NETWORKS} | Intervalo: ${interval}s"
+    echo
+
+    if [ "$TOTAL_NETWORKS" -gt 0 ]; then
+      local idx=0
+      local sorted; sorted=$(echo "$NETWORKS" | jq 'sort_by(.level | tonumber) | reverse' 2>/dev/null)
+      echo "$sorted" | jq -c '.[]' 2>/dev/null | while read -r net; do
+        idx=$((idx + 1))
+        echo "  [${idx}] ----------------------------------------------------"
+        show_network_detail "$net"
+      done
+    else
+      echo "  Nenhuma rede encontrada."
+    fi
+
+    echo "  Pressione Ctrl+C para parar"
     sleep "$interval"
   done
 }
@@ -530,8 +505,7 @@ show_help() {
   echo "    -m <n>       Filtrar por sinal minimo (ex: -65)"
   echo "    -f <nome>    Buscar redes por SSID"
   echo "    -o <mac>     Consultar fabricante pelo MAC"
-  echo "    -C           Desativar cores"
-  echo "    -h           Mostrar esta ajuda"
+    echo "    -h           Mostrar esta ajuda"
   echo "    -v           Mostrar versao"
   echo
   echo "  Exemplos:"
@@ -556,13 +530,12 @@ interactive_menu() {
     print_banner
     echo "  $(get_scanner_info)"
     echo
-    echo "  [1] Varredura Rapida     - Listar redes em tabela"
-    echo "  [2] Varredura Detalhada  - Informacoes completas"
-    echo "  [3] Monitor Continuo     - Atualizar automaticamente"
-    echo "  [4] Filtrar por Banda    - 2.4GHz, 5GHz ou 6GHz"
-    echo "  [5] Buscar por SSID      - Localizar rede pelo nome"
-    echo "  [6] Consultar Fabricante - Descobrir vendor pelo MAC"
-    echo "  [7] Saida JSON           - Dados brutos"
+    echo "  [1] Scan Detalhado       - Informacoes completas das redes"
+    echo "  [2] Monitor Continuo     - Scan detalhado automatico"
+    echo "  [3] Filtrar por Banda    - 2.4GHz, 5GHz ou 6GHz"
+    echo "  [4] Buscar por SSID      - Localizar rede pelo nome"
+    echo "  [5] Consultar Fabricante - Descobrir vendor pelo MAC"
+    echo "  [6] Saida JSON           - Dados brutos"
     echo
     echo "  [0] Sair"
     echo
@@ -572,40 +545,36 @@ interactive_menu() {
 
     case "$opt" in
       1)
-        if perform_scan; then show_summary; echo "  Total: $TOTAL_NETWORKS redes"
-        else msg_error "Falha na varredura. Wi-Fi ativado?"; fi
-        echo; printf "  Pressione Enter para continuar..."; read -r ;;
-      2)
         if perform_scan; then show_networks; echo "  Total: $TOTAL_NETWORKS redes"
         else msg_error "Falha na varredura. Wi-Fi ativado?"; fi
         echo; printf "  Pressione Enter para continuar..."; read -r ;;
-      3)
+      2)
         printf "  Intervalo em segundos [5]: "; read -r intervalo
         watch_mode "${intervalo:-5}" ;;
-      4)
+      3)
         printf "  Banda (2.4, 5, 6): "; read -r banda
         if perform_scan; then
           data=$(filter_band "$NETWORKS" "$banda")
           count=$(echo "$data" | jq 'length' 2>/dev/null || echo 0)
           echo "  Redes em ${banda}GHz: $count"
-          [ "$count" -gt 0 ] && show_summary "$data"
+          [ "$count" -gt 0 ] && show_networks "$data"
         fi
         echo; printf "  Pressione Enter para continuar..."; read -r ;;
-      5)
+      4)
         printf "  Termo de busca: "; read -r termo
         if perform_scan; then
           data=$(search_ssid "$NETWORKS" "$termo")
           count=$(echo "$data" | jq 'length' 2>/dev/null || echo 0)
           echo "  Resultados para '${termo}': $count"
-          [ "$count" -gt 0 ] && show_summary "$data"
+          [ "$count" -gt 0 ] && show_networks "$data"
         fi
         echo; printf "  Pressione Enter para continuar..."; read -r ;;
-      6)
+      5)
         printf "  MAC (ex: AA:BB:CC:DD:EE:FF): "; read -r mac
         vendor=$(oui_vendor "$mac"); [ -z "$vendor" ] && vendor="Nao encontrado"
         msg_info "Fabricante: $vendor"
         echo; printf "  Pressione Enter para continuar..."; read -r ;;
-      7)
+      6)
         if perform_scan; then echo "$NETWORKS" | jq '.'
         else msg_error "Falha na varredura"; fi
         echo; printf "  Pressione Enter para continuar..."; read -r ;;
@@ -629,7 +598,6 @@ main() {
       -m) min_signal="$2"; shift ;;
       -f) search_term="$2"; shift ;;
       -o) oui_vendor "$2"; exit 0; shift ;;
-      -C) BOLD=''; DIM=''; R=''; G=''; Y=''; N='' ;;
       -h) show_help; exit 0 ;;
       -v) show_version; exit 0 ;;
       *)  echo "Opcao invalida: $1"; show_help; exit 1 ;;
